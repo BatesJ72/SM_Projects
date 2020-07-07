@@ -1,0 +1,84 @@
+ALTER PROCEDURE [dbo].[JB_AllocationAnalysis]
+	
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+--1. Create temp table with all settlement amount date changes and Client Ids
+--drop table #AllData
+
+
+select	sub2.*
+into #AllData
+from (
+		select sub.*, ROW_NUMBER () OVER (PARTITION BY ClientId ORDER BY ChangeDate desc) as RowNumber
+		from	(
+				select T.*, min(C.ChangeDate) as ChangeDate
+				from (
+						select 	CFT.CaseId, C.Name as CaseName, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount
+						from	clientsfacttable as CFT
+									LEFT OUTER JOIN Cases as C on CFT.CaseId=C.Id
+									LEFT OUTER JOIN FullProductViews as FPV on FPV.ClientId=CFT.ClientId
+						where	C.Name not like '%hold%' and c.name not like '%closed%' and c.IsMT = 1
+								and FPV.CaseUserDisplayName not like 'Global' and FPV.CaseUserDisplayName not like 'Complete' 
+								and FPV.CaseUserDisplayName not like 'Inactive' and FPV.CaseUserDisplayName not like 'ClearMeasure Admin'
+						group by CFT.CaseId, C.Name, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount
+						) as T
+				
+					LEFT OUTER JOIN ClientsFactTable as C on C.ClientId =T.ClientId and C.SettlementAmount=T.SettlementAmount
+		
+				group by T.CaseId, T.CaseName, T.CaseUserDisplayName, T.ClientId, T.SettlementAmount
+				) as sub
+			) as sub2
+where sub2.RowNumber = 1
+
+
+		--select top 10 * from #AllData
+
+
+--2. Get a distinct list of all CaseIds and dates the SA changed
+--drop table #Case_SADates
+
+select	distinct CaseId, CaseName, ChangeDate
+into	#Case_SADates
+from	#AllData
+
+
+		--select * from #Case_SADates
+		
+
+--3. Get a count of client ids that have that change date for the case
+--drop table #Case_ClientCount
+
+select	CD.*, count(AD.ClientId) as ClientCount
+into	#Case_ClientCount
+from	#Case_SADates as CD
+			LEFT OUTER JOIN #AllData as AD on CD.CaseId=AD.CaseId and CD.ChangeDate=AD.ChangeDate
+group by CD.CaseId, CD.CaseName, CD.ChangeDate
+
+
+	--select * from	#Case_ClientCount
+
+
+--4. Determine if the change date was more than 6 months ago, 3-6 months, less than 3 months, or null
+select	sub2.CaseId, sub2.CaseName, sub2.Time_Since_SA, sum(sub2.ClientCount) as TotalClients
+from	(
+		select	sub.*, 
+					case 
+						when sub.Months_Since_SA_Updated < 3 then 'b - Fewer than 3 months ago'
+						when sub.Months_Since_SA_Updated > 6 then 'd - More than 6 months ago'
+						when sub.Months_Since_SA_Updated is null then 'a - Not Allocated'
+						when sub.Months_Since_SA_Updated = 4 or sub.Months_Since_SA_Updated = 5 then 'c - 3 to 6 months ago'
+						end as [Time_Since_SA]
+		from (
+				select	*, DATEDIFF(month, ChangeDate, GETDATE()) as Months_Since_SA_Updated
+				from	#Case_ClientCount
+			) as sub
+		) as sub2
+group by sub2.CaseId, sub2.CaseName, sub2.Time_Since_SA
+order by sub2.CaseId, sub2.Time_Since_SA
+
+
+END
