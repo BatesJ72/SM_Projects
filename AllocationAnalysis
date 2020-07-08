@@ -33,31 +33,33 @@ from (
 		from	(
 				select T.*, min(C.ChangeDate) as ChangeDate
 				from (
-						select 	CFT.CaseId, C.Name as CaseName, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount
+						select 	CFT.CaseId, C.Name as CaseName, C.Tort, C.SettlementFundingDate, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount
 						from	clientsfacttable as CFT
 									LEFT OUTER JOIN Cases as C on CFT.CaseId=C.Id
 									LEFT OUTER JOIN FullProductViews as FPV on FPV.ClientId=CFT.ClientId
+									LEFT OUTER JOIN Clients on Clients.Id=CFT.ClientId 
 						where	C.Name not like '%hold%' and c.name not like '%closed%' and c.IsMT = 1
 								and FPV.CaseUserDisplayName not like 'Global' and FPV.CaseUserDisplayName not like 'Complete' 
 								and FPV.CaseUserDisplayName not like 'Inactive' and FPV.CaseUserDisplayName not like 'ClearMeasure Admin'
-						group by CFT.CaseId, C.Name, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount
+								and Clients.FinalizedStatusId <> 2 and Clients.FinalizedStatusId <> 3
+						group by CFT.CaseId, C.Name, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount, C.Tort, C.SettlementFundingDate
 						) as T
 				
 					LEFT OUTER JOIN ClientsFactTable as C on C.ClientId =T.ClientId and C.SettlementAmount=T.SettlementAmount
 		
-				group by T.CaseId, T.CaseName, T.CaseUserDisplayName, T.ClientId, T.SettlementAmount
+				group by T.CaseId, T.CaseName, T.CaseUserDisplayName, T.ClientId, T.SettlementAmount, T.Tort, T.SettlementFundingDate
 				) as sub
 			) as sub2
 where sub2.RowNumber = 1
 
 
-		--select top 10 * from #AllData
+		--select * from #AllData
 
 
 --2. Get a distinct list of all CaseIds and dates the SA changed
 --drop table #Case_SADates
 
-select	distinct CaseId, CaseName, ChangeDate
+select	distinct CaseId, CaseName, Tort, SettlementFundingDate, ChangeDate
 into	#Case_SADates
 from	#AllData
 
@@ -70,16 +72,18 @@ from	#AllData
 
 select	CD.*, count(AD.ClientId) as ClientCount
 into	#Case_ClientCount
-from	#Case_SADates as CD
-			LEFT OUTER JOIN #AllData as AD on CD.CaseId=AD.CaseId and CD.ChangeDate=AD.ChangeDate
-group by CD.CaseId, CD.CaseName, CD.ChangeDate
+from	#AllData as AD
+			LEFT OUTER JOIN #Case_SADates as CD on CD.CaseId=AD.CaseId and CD.ChangeDate=AD.ChangeDate
+group by CD.CaseId, CD.CaseName, CD.ChangeDate, CD.Tort, CD.SettlementFundingDate
 
 
 	--select * from	#Case_ClientCount
+	--select sum(ClientCount) from #Case_ClientCount
 
 
 --4. Determine if the change date was more than 6 months ago, 3-6 months, less than 3 months, or null
-select	sub2.CaseId, sub2.CaseName, sub2.Time_Since_SA, sum(sub2.ClientCount) as TotalClients
+select	sub2.CaseId, sub2.CaseName, sub2.Tort, sub2.SettlementFundingDate, sub2.Time_Since_SA, sum(sub2.ClientCount) as TotalClients
+--into #temp
 from	(
 		select	sub.*, 
 					case 
@@ -94,8 +98,10 @@ from	(
 				from	#Case_ClientCount
 			) as sub
 		) as sub2
-group by sub2.CaseId, sub2.CaseName, sub2.Time_Since_SA
+group by sub2.CaseId, sub2.CaseName, sub2.Time_Since_SA, sub2.Tort, sub2.SettlementFundingDate
 order by sub2.CaseId, sub2.Time_Since_SA
+
+--select sum(TotalClients) from #temp 
 
 
 END
