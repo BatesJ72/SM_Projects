@@ -90,7 +90,7 @@ from	(
 						when sub.Months_Since_SA_Updated < 3 then 'Fewer than 3 months ago'
 						when sub.Months_Since_SA_Updated > 6 then 'More than 6 months ago'
 						when sub.Months_Since_SA_Updated is null then 'Not Allocated'
-						when sub.Months_Since_SA_Updated = 4 or sub.Months_Since_SA_Updated = 5 then '3 to 6 months ago'
+						when sub.Months_Since_SA_Updated >= 3 and sub.Months_Since_SA_Updated <= 6 then '3 to 6 months ago'
 						else 'Look Into'
 						end as [Time_Since_SA]
 		from (
