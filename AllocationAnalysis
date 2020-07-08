@@ -31,9 +31,14 @@ into #AllData
 from (
 		select sub.*, ROW_NUMBER () OVER (PARTITION BY ClientId ORDER BY ChangeDate desc) as RowNumber
 		from	(
-				select T.*, min(C.ChangeDate) as ChangeDate
+				select T.*, 
+						case
+							when T.CurrentSA is null or T.CurrentSA = '' then 72 
+							else min(C.ChangeDate) 
+							end as ChangeDate
 				from (
-						select 	CFT.CaseId, C.Name as CaseName, C.Tort, C.SettlementFundingDate, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount
+						select 	CFT.CaseId, C.Name as CaseName, C.Tort, C.SettlementFundingDate, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount,
+								Clients.SettlementAmount as CurrentSA
 						from	clientsfacttable as CFT
 									LEFT OUTER JOIN Cases as C on CFT.CaseId=C.Id
 									LEFT OUTER JOIN FullProductViews as FPV on FPV.ClientId=CFT.ClientId
@@ -41,19 +46,20 @@ from (
 						where	C.Name not like '%hold%' and c.name not like '%closed%' and c.IsMT = 1
 								and FPV.CaseUserDisplayName not like 'Global' and FPV.CaseUserDisplayName not like 'Complete' 
 								and FPV.CaseUserDisplayName not like 'Inactive' and FPV.CaseUserDisplayName not like 'ClearMeasure Admin'
-								and Clients.FinalizedStatusId <> 2 and Clients.FinalizedStatusId <> 3
-						group by CFT.CaseId, C.Name, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount, C.Tort, C.SettlementFundingDate
+								and (Clients.FinalizedStatusId is null or Clients.FinalizedStatusId = 1)
+						group by	CFT.CaseId, C.Name, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount, C.Tort, C.SettlementFundingDate, 
+									Clients.SettlementAmount
 						) as T
 				
 					LEFT OUTER JOIN ClientsFactTable as C on C.ClientId =T.ClientId and C.SettlementAmount=T.SettlementAmount
 		
-				group by T.CaseId, T.CaseName, T.CaseUserDisplayName, T.ClientId, T.SettlementAmount, T.Tort, T.SettlementFundingDate
+				group by T.CaseId, T.CaseName, T.CaseUserDisplayName, T.ClientId, T.SettlementAmount, T.Tort, T.SettlementFundingDate, T.CurrentSA
 				) as sub
 			) as sub2
-where sub2.RowNumber = 1
+where sub2.RowNumber = 1 
 
 
-		--select * from #AllData
+		--select * from #AllData order by CurrentSA
 
 
 --2. Get a distinct list of all CaseIds and dates the SA changed
@@ -64,7 +70,8 @@ into	#Case_SADates
 from	#AllData
 
 
-		--select * from #Case_SADates
+		--select * from #Case_SADates where changedate = 72.72
+		--select * from #AllData where changedate is null
 		
 
 --3. Get a count of client ids that have that change date for the case
@@ -82,21 +89,28 @@ group by CD.CaseId, CD.CaseName, CD.ChangeDate, CD.Tort, CD.SettlementFundingDat
 
 
 --4. Determine if the change date was more than 6 months ago, 3-6 months, less than 3 months, or null
+--drop table #temp
+
 select	sub2.CaseId, sub2.CaseName, sub2.Tort, sub2.SettlementFundingDate, sub2.Time_Since_SA, sum(sub2.ClientCount) as TotalClients
 --into #temp
 from	(
 		select	sub.*, 
 					case 
+						when sub.Months_Since_SA_Updated = 72 then 'Not Allocated'
 						when sub.Months_Since_SA_Updated < 3 then 'Fewer than 3 months ago'
 						when sub.Months_Since_SA_Updated > 6 then 'More than 6 months ago'
-						when sub.Months_Since_SA_Updated is null then 'Not Allocated'
 						when sub.Months_Since_SA_Updated >= 3 and sub.Months_Since_SA_Updated <= 6 then '3 to 6 months ago'
 						else 'Look Into'
 						end as [Time_Since_SA]
 		from (
-				select	*, DATEDIFF(month, ChangeDate, GETDATE()) as Months_Since_SA_Updated
+				select	*, 
+						case
+							when changedate = 72 then 72
+							else DATEDIFF(month, ChangeDate, GETDATE()) 
+							end as Months_Since_SA_Updated
 				from	#Case_ClientCount
 			) as sub
+
 		) as sub2
 group by sub2.CaseId, sub2.CaseName, sub2.Time_Since_SA, sub2.Tort, sub2.SettlementFundingDate
 order by sub2.CaseId, sub2.Time_Since_SA
