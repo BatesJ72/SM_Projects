@@ -1,10 +1,13 @@
 USE [S3Reporting]
 GO
-/****** Object:  StoredProcedure [dbo].[JB_AllocationAnalysis]    Script Date: 7/8/2020 9:49:46 AM ******/
+
+/****** Object:  StoredProcedure [dbo].[JB_AllocationAnalysis]    Script Date: 7/13/2020 2:53:51 PM ******/
 SET ANSI_NULLS ON
 GO
+
 SET QUOTED_IDENTIFIER ON
 GO
+
 
 
 
@@ -14,7 +17,7 @@ GO
 -- Create date: <12-12-19>
 -- Description:	<Description,,>
 -- =============================================
-ALTER PROCEDURE [dbo].[JB_AllocationAnalysis]
+CREATE PROCEDURE [dbo].[JB_AllocationAnalysis_PendingLiens]
 	
 AS
 BEGIN
@@ -22,8 +25,8 @@ BEGIN
 	-- interfering with SELECT statements.
 	SET NOCOUNT ON;
 
---1. Create temp table with all settlement amount date changes and Client Ids
---drop table #AllData
+--1. (Allocation Analysis - Original) Create temp table with all settlement amount date changes and Client Ids
+	--drop table #AllData
 
 
 select	sub2.*
@@ -37,8 +40,8 @@ from (
 							else min(C.ChangeDate) 
 							end as ChangeDate
 				from (
-						select 	CFT.CaseId, C.Name as CaseName, C.Tort, C.SettlementFundingDate, FPV.CaseUserDisplayName, CFT.ClientId, 
-							CFT.SettlementAmount, Clients.SettlementAmount as CurrentSA
+						select 	CFT.CaseId, C.Name as CaseName, C.Tort, C.SettlementFundingDate, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount,
+								Clients.SettlementAmount as CurrentSA
 						from	clientsfacttable as CFT
 									LEFT OUTER JOIN Cases as C on CFT.CaseId=C.Id
 									LEFT OUTER JOIN FullProductViews as FPV on FPV.ClientId=CFT.ClientId
@@ -47,8 +50,9 @@ from (
 								and FPV.CaseUserDisplayName not like 'Global' and FPV.CaseUserDisplayName not like 'Complete' 
 								and FPV.CaseUserDisplayName not like 'Inactive' and FPV.CaseUserDisplayName not like 'ClearMeasure Admin'
 								and (Clients.FinalizedStatusId is null or Clients.FinalizedStatusId = 1)
-						group by	CFT.CaseId, C.Name, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount, C.Tort, 
-								C.SettlementFundingDate, Clients.SettlementAmount
+								and Clients.SettlementAmount is not null and Clients.SettlementAmount <> ''
+						group by	CFT.CaseId, C.Name, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount, C.Tort, C.SettlementFundingDate, 
+									Clients.SettlementAmount
 						) as T
 				
 					LEFT OUTER JOIN ClientsFactTable as C on C.ClientId =T.ClientId and C.SettlementAmount=T.SettlementAmount
@@ -59,63 +63,81 @@ from (
 where sub2.RowNumber = 1 
 
 
-		--select * from #AllData order by CurrentSA
+
+--2. (Allocation Analysis - Original) Determine if the change date was more than 6 months ago, 3-6 months, less than 3 months, or null
+	--drop table #AllocationAnalysis
 
 
---2. Get a distinct list of all CaseIds and dates the SA changed
---drop table #Case_SADates
-
-select	distinct CaseId, CaseName, Tort, SettlementFundingDate, ChangeDate
-into	#Case_SADates
-from	#AllData
-
-
-		--select * from #Case_SADates where changedate = 72.72
-		--select * from #AllData where changedate is null
-		
-
---3. Get a count of client ids that have that change date for the case
---drop table #Case_ClientCount
-
-select	CD.*, count(AD.ClientId) as ClientCount
-into	#Case_ClientCount
-from	#AllData as AD
-			LEFT OUTER JOIN #Case_SADates as CD on CD.CaseId=AD.CaseId and CD.ChangeDate=AD.ChangeDate
-group by CD.CaseId, CD.CaseName, CD.ChangeDate, CD.Tort, CD.SettlementFundingDate
+select	sub.*, 
+			case 
+				when sub.Months_Since_SA_Updated = 72 then 'Not Allocated'
+				when sub.Months_Since_SA_Updated < 3 then 'Fewer than 3 months ago'
+				when sub.Months_Since_SA_Updated > 6 then 'More than 6 months ago'
+				when sub.Months_Since_SA_Updated >= 3 and sub.Months_Since_SA_Updated <= 6 then '3 to 6 months ago'
+				else 'Look Into'
+				end as [Time_Since_SA]
+into	#AllocationAnalysis
+from (
+		select	*, 
+				case
+					when changedate = 72 then 72
+					else DATEDIFF(month, ChangeDate, GETDATE()) 
+					end as Months_Since_SA_Updated
+		from	#AllData
+	) as sub
 
 
-	--select * from	#Case_ClientCount
-	--select sum(ClientCount) from #Case_ClientCount
 
+--3. (Pending Liens Pivot) Create a temp table that has all the pending lien pivot data
+	--drop table #PendingPivot
 
---4. Determine if the change date was more than 6 months ago, 3-6 months, less than 3 months, or null
---drop table #temp
-
-select	sub2.CaseId, sub2.CaseName, sub2.Tort, sub2.SettlementFundingDate, sub2.Time_Since_SA, sum(sub2.ClientCount) as TotalClients
---into #temp
+select	Main2.ClientId, Main2.Pending
+into	#PendingPivot
 from	(
-		select	sub.*, 
-					case 
-						when sub.Months_Since_SA_Updated = 72 then 'Not Allocated'
-						when sub.Months_Since_SA_Updated < 3 then 'Fewer than 3 months ago'
-						when sub.Months_Since_SA_Updated > 6 then 'More than 6 months ago'
-						when sub.Months_Since_SA_Updated >= 3 and sub.Months_Since_SA_Updated <= 6 then '3 to 6 months ago'
-						else 'Look Into'
-						end as [Time_Since_SA]
-		from (
-				select	*, 
-						case
-							when changedate = 72 then 72
-							else DATEDIFF(month, ChangeDate, GETDATE()) 
-							end as Months_Since_SA_Updated
-				from	#Case_ClientCount
-			) as sub
+		select	* 
+		from	(
+				select	sub.ClientId, sub.LienId, sub.Stage_Summary
+				from	(
+						select	FPV.CaseName, FPV.CaseId,
+								FPV.ClientId, FPV.ClientSettlementAmount,
+								Case
+									When FPV.ClientSettlementAmount is null or FPV.ClientSettlementAmount = '' then 'Unallocated'
+									Else 'Allocated'
+									End as [Allocated_Summary],
+								FPV.Id as LienId, FPV.LienType, FPV.StatusName,FPV.StatusId, FPV.Stage, FPV.ClosedReason, 
+								Case
+									When FPV.Stage not like 'Final%' and FPV.Stage not like 'Closed' and (FPV.StatusId is null or FPV.StatusId <> 2) then 'Pending'
+									Else 'Final'
+									End as [Stage_Summary]
 
-		) as sub2
-group by sub2.CaseId, sub2.CaseName, sub2.Time_Since_SA, sub2.Tort, sub2.SettlementFundingDate
-order by sub2.CaseId, sub2.Time_Since_SA
+						from	fullproductviews as FPV
+									LEFT OUTER JOIN Clients on Clients.Id = FPV.ClientId
+									LEFT OUTER JOIN Cases as C on C.Id = FPV.CaseId
 
---select sum(TotalClients) from #temp 
+						where	C.Name not like '%hold%' and c.name not like '%closed%' and c.IsMT = 1
+								and FPV.CaseUserDisplayName not like 'Global' and FPV.CaseUserDisplayName not like 'Complete' 
+								and FPV.CaseUserDisplayName not like 'Inactive' and FPV.CaseUserDisplayName not like 'ClearMeasure Admin'
+								and (Clients.FinalizedStatusId is null or Clients.FinalizedStatusId = 1)
+								and Clients.SettlementAmount is not null and Clients.SettlementAmount <> ''
+						) as sub
+				where sub.Allocated_Summary = 'Allocated'
+				) as Main
+		pivot (count(LienId) for Stage_Summary in ([Final], [Pending])) as Pivot1
+	 ) as Main2
+	
+	
+
+
+--4. Combine the Allocation Analysis data and the Pending Lien Pivot Data
+
+select distinct * 
+from	#AllocationAnalysis as A
+			LEFT OUTER JOIN #PendingPivot as P on P.ClientId=A.ClientId
+
 
 
 END
+
+GO
+
+
