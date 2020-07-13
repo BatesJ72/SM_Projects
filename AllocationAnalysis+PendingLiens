@@ -136,8 +136,10 @@ from	(
 --4. Combine the Allocation Analysis data and the Pending Lien Pivot Data
 
 select A.*, P.Pending, P.Pending_Analysis
-from	#AllocationAnalysis as A
-			LEFT OUTER JOIN #PendingPivot as P on P.ClientId=A.ClientId
+from	#PendingPivot as P 
+			LEFT OUTER JOIN #AllocationAnalysis as A on P.ClientId=A.ClientId
+
+
 
 
 
