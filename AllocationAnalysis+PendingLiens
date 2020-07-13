@@ -39,24 +39,26 @@ from (
 							end as ChangeDate
 				from (
 						select 	CFT.CaseId, C.Name as CaseName, C.Tort, C.SettlementFundingDate, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount,
-								Clients.SettlementAmount as CurrentSA
+								Clients.SettlementAmount as CurrentSA, Clients.FinalizedStatusId, C.IsMt
 						from	clientsfacttable as CFT
 									LEFT OUTER JOIN Cases as C on CFT.CaseId=C.Id
 									LEFT OUTER JOIN FullProductViews as FPV on FPV.ClientId=CFT.ClientId
 									LEFT OUTER JOIN Clients on Clients.Id=CFT.ClientId 
-						where	C.Name not like '%hold%' and c.name not like '%closed%' and c.IsMT = 1
-								and FPV.CaseUserDisplayName not like 'Global' and FPV.CaseUserDisplayName not like 'Complete' 
-								and FPV.CaseUserDisplayName not like 'Inactive' and FPV.CaseUserDisplayName not like 'ClearMeasure Admin'
-								and (Clients.FinalizedStatusId is null or Clients.FinalizedStatusId = 1)
-								and Clients.SettlementAmount is not null and Clients.SettlementAmount <> ''
 						group by	CFT.CaseId, C.Name, FPV.CaseUserDisplayName, CFT.ClientId, CFT.SettlementAmount, C.Tort, C.SettlementFundingDate, 
-									Clients.SettlementAmount
+									Clients.SettlementAmount, Clients.FinalizedStatusId, C.IsMT
 						) as T
 				
 					LEFT OUTER JOIN ClientsFactTable as C on C.ClientId =T.ClientId and C.SettlementAmount=T.SettlementAmount
 		
-				group by T.CaseId, T.CaseName, T.CaseUserDisplayName, T.ClientId, T.SettlementAmount, T.Tort, T.SettlementFundingDate, T.CurrentSA
+				group by T.CaseId, T.CaseName, T.CaseUserDisplayName, T.ClientId, T.SettlementAmount, T.Tort, T.SettlementFundingDate, T.CurrentSA, 
+							T.FinalizedStatusId, T.IsMt
 				) as sub
+			
+			where	sub.CaseName not like '%hold%' and sub.CaseName not like '%closed%' and sub.IsMT = 1
+					and sub.CaseUserDisplayName not like 'Global' and sub.CaseUserDisplayName not like 'Complete' 
+					and sub.CaseUserDisplayName not like 'Inactive' and sub.CaseUserDisplayName not like 'ClearMeasure Admin'
+					and (sub.FinalizedStatusId is null or sub.FinalizedStatusId = 1)
+					and sub.SettlementAmount is not null and sub.SettlementAmount <> ''
 			) as sub2
 where sub2.RowNumber = 1 
 
@@ -138,8 +140,6 @@ from	(
 select A.*, P.Pending, P.Pending_Analysis
 from	#PendingPivot as P 
 			LEFT OUTER JOIN #AllocationAnalysis as A on P.ClientId=A.ClientId
-
-
 
 
 
