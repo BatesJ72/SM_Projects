@@ -1,0 +1,33 @@
+select	Main2.ClientId, Main2.Pending
+from	(
+		select	* 
+		from	(
+				select	sub.ClientId, sub.LienId, sub.Stage_Summary
+				from	(
+						select	FPV.CaseName, FPV.CaseId,
+								FPV.ClientId, FPV.ClientSettlementAmount,
+								Case
+									When FPV.ClientSettlementAmount is null or FPV.ClientSettlementAmount = '' then 'Unallocated'
+									Else 'Allocated'
+									End as [Allocated_Summary],
+								FPV.Id as LienId, FPV.LienType, FPV.StatusName,FPV.StatusId, FPV.Stage, FPV.ClosedReason, 
+								Case
+									When FPV.Stage not like 'Final%' and FPV.Stage not like 'Closed' and (FPV.StatusId is null or FPV.StatusId <> 2) then 'Pending'
+									Else 'Final'
+									End as [Stage_Summary]
+
+						from	fullproductviews as FPV
+									LEFT OUTER JOIN Clients on Clients.Id = FPV.ClientId
+									LEFT OUTER JOIN Cases as C on C.Id = FPV.CaseId
+
+						where	C.Name not like '%hold%' and c.name not like '%closed%' and c.IsMT = 1
+								and FPV.CaseUserDisplayName not like 'Global' and FPV.CaseUserDisplayName not like 'Complete' 
+								and FPV.CaseUserDisplayName not like 'Inactive' and FPV.CaseUserDisplayName not like 'ClearMeasure Admin'
+								and (Clients.FinalizedStatusId is null or Clients.FinalizedStatusId = 1)
+						) as sub
+				where sub.Allocated_Summary = 'Allocated'
+				) as Main
+		pivot (count(LienId) for Stage_Summary in ([Final], [Pending])) as Pivot1
+	 ) as Main2
+	
+	
