@@ -1,10 +1,8 @@
 USE [S3Reporting]
 GO
-
-/****** Object:  StoredProcedure [dbo].[JB_AllocationAnalysis]    Script Date: 7/13/2020 2:53:51 PM ******/
+/****** Object:  StoredProcedure [dbo].[JB_AllocationAnalysis_PendingLiens]    Script Date: 7/13/2020 3:23:18 PM ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
 GO
 
@@ -17,7 +15,7 @@ GO
 -- Create date: <12-12-19>
 -- Description:	<Description,,>
 -- =============================================
-CREATE PROCEDURE [dbo].[JB_AllocationAnalysis_PendingLiens]
+ALTER PROCEDURE [dbo].[JB_AllocationAnalysis_PendingLiens]
 	
 AS
 BEGIN
@@ -137,7 +135,4 @@ from	#AllocationAnalysis as A
 
 
 END
-
-GO
-
 
