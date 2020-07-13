@@ -128,7 +128,7 @@ from	(
 
 --4. Combine the Allocation Analysis data and the Pending Lien Pivot Data
 
-select distinct * 
+select A.*, P.Pending
 from	#AllocationAnalysis as A
 			LEFT OUTER JOIN #PendingPivot as P on P.ClientId=A.ClientId
 
