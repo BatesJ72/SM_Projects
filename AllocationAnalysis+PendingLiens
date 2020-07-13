@@ -89,7 +89,14 @@ from (
 --3. (Pending Liens Pivot) Create a temp table that has all the pending lien pivot data
 	--drop table #PendingPivot
 
-select	Main2.ClientId, Main2.Pending
+
+select	Main2.ClientId, Main2.Pending,
+		Case
+			When Main2.Pending = 0 then 'No liens pending'
+			When Main2.Pending = 1 then 'One lien pending'
+			When Main2.Pending = 2 then 'Two liens pending'
+			Else 'More than two liens pending'
+			End As [Pending_Analysis]
 into	#PendingPivot
 from	(
 		select	* 
@@ -128,7 +135,7 @@ from	(
 
 --4. Combine the Allocation Analysis data and the Pending Lien Pivot Data
 
-select A.*, P.Pending
+select A.*, P.Pending, P.Pending_Analysis
 from	#AllocationAnalysis as A
 			LEFT OUTER JOIN #PendingPivot as P on P.ClientId=A.ClientId
 
