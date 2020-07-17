@@ -1,0 +1,83 @@
+USE [S3Reporting]
+GO
+/****** Object:  StoredProcedure [dbo].[JB_FinalizedDate_AllCases_ForSMTeam]    Script Date: 7/17/2020 12:25:01 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+-- =============================================
+-- Author:		<JB>
+-- Create date: <12-12-19>
+-- Description:	<Description,,>
+-- =============================================
+ALTER PROCEDURE [dbo].[JB_FinalizedDate_AllCases_ForSMTeam]
+	
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+--Query 1
+select lienproductid, stagedate, stage, phase, CurrentPhase
+into #finalizeddate
+from ProductStageHistory_Table
+where (phase = 'Finalized' or phase = 'Closed') and (currentphase = 'finalized' or currentphase = 'Closed') 
+group by lienproductid, stage, phase, stagedate, CurrentPhase
+order by lienproductid, stagedate
+
+--drop table #finalizeddate
+
+select sub.*, 
+		case
+			when RowNumber = 1 and sub.Phase = 'Closed' then 'StraightClosed'
+			Else 'HasFinal'
+			End as 'StageOrder'
+into #StageOrder
+from (
+		select *, ROW_NUMBER() over(partition by lienproductid order by phase desc) as RowNumber
+		from #finalizeddate
+	) as sub
+
+	
+	
+
+--Get date for straight to closed liens
+select lienproductid, min(stagedate) as FirstFinalized
+into #FinalizedDate2
+from #StageOrder
+where StageOrder = 'StraightClosed'
+group by lienproductid
+order by lienproductid
+
+
+--Append date data for all liens that didn't go straight to closed
+Insert Into #FinalizedDate2 (lienproductid, FirstFinalized)
+select lienproductid, max(stagedate) as FirstFinalized 
+from #StageOrder
+where StageOrder = 'HasFinal' 
+		and (phase = 'Finalized') and (currentphase = 'finalized' or currentphase = 'Closed') 
+group by lienproductid
+
+
+--Main Query
+select  FPV.Id as LienId, FPV.Stage, FD.FirstFinalized as FinalizedDate_Liens, Lientype,
+		FPV.CaseName, 
+		clients.Id as 'Client Id',
+        clients.FinalizedStatusId, F.Max_ChangeDate as FinalizedDate_Clients,
+        FPV.IsMT, FPV.Tort, FPV.CaseUserDisplayName
+
+from FullProductViews as FPV 
+		LEFT OUTER JOIN #finalizeddate2 as FD on FD.LienProductId=FPV.Id
+		LEFT JOIN clients on clients.id = FPV.clientid
+        LEFT JOIN JB_ClientFinalizedDate as F on clients.Id = F.ClientId
+
+where	casename not like '%hold%' and casename not like '%closed%' and casename not like '%extra liens%' 
+		and casename not like '%production debug%' and casename is not null and casename <> 'null'
+		and FPV.IsMT = 1
+		and (FPV.InactiveReasonId is null or FPV.InactiveReasonId = 4)
+		
+
+END
