@@ -78,6 +78,8 @@ where	casename not like '%hold%' and casename not like '%closed%' and casename n
 		and casename not like '%production debug%' and casename is not null and casename <> 'null'
 		and FPV.IsMT = 1
 		and (FPV.InactiveReasonId is null or FPV.InactiveReasonId = 4)
+		and FPV.CaseUserDispayName not like 'complete' and FPV.CaseUserDispayName not like 'global'
+		and FPV.CaseUserDispayName not like 'inactive' and FPV.CaseUserDispayName not like 'ClearMeasure Admin'
 		
 
 END
