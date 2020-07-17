@@ -63,7 +63,7 @@ group by lienproductid
 
 
 --Main Query
-select  FPV.Id as LienId, FPV.LienProductStatus, FPV.Stage, FD.FirstFinalized as FinalizedDate_Liens, Lientype,
+select  FPV.Id as LienId, FPV.StatusName, FPV.Stage, FD.FirstFinalized as FinalizedDate_Liens, Lientype,
 		FPV.CaseName, 
 		clients.Id as 'Client Id',
         clients.FinalizedStatusId, F.Max_ChangeDate as FinalizedDate_Clients,
