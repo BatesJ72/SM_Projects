@@ -1,0 +1,260 @@
+USE [S3Reporting]
+GO
+
+/****** Object:  StoredProcedure [dbo].[JB_FinalizedDate_5Boxv2]    Script Date: 7/17/2020 9:21:10 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+
+
+
+-- =============================================
+-- Author:		<JB>
+-- Create date: <12-12-19>
+-- Description:	<Description,,>
+-- =============================================
+CREATE PROCEDURE [dbo].[JB_FinalizedDate_5Boxv2]
+	
+AS
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+
+
+--drop table #finalizeddate
+	--Query 1
+select lienproductid, stagedate, stage, phase, CurrentPhase
+into #finalizeddate
+from ProductStageHistory_Table
+where (phase = 'Finalized' or phase = 'Closed') and (currentphase = 'finalized' or currentphase = 'Closed') 
+		--and lienproductid = 760487
+group by lienproductid, stage, phase, stagedate, CurrentPhase
+order by lienproductid, stagedate
+
+
+--select * from #finalizeddate
+
+
+--drop table #stageorder
+
+select sub.*, 
+		case
+			when RowNumber = 1 and sub.Phase = 'Closed' then 'StraightClosed'
+			Else 'HasFinal'
+			End as 'StageOrder'
+into #StageOrder
+from (
+		select *, ROW_NUMBER() over(partition by lienproductid order by phase desc) as RowNumber
+		from #finalizeddate
+	) as sub
+
+--select * from #stageorder	
+
+--drop table #finalizeddate2
+--Get date for straight to closed liens
+select lienproductid, min(stagedate) as FirstFinalized
+into #FinalizedDate2
+from #StageOrder
+where StageOrder = 'StraightClosed'
+group by lienproductid
+order by lienproductid
+
+
+--Append date data for all liens that didn't go straight to closed
+Insert Into #FinalizedDate2 (lienproductid, FirstFinalized)
+select lienproductid, max(stagedate) as FirstFinalized 
+from #StageOrder
+where StageOrder = 'HasFinal' 
+		and (phase = 'Finalized') and (currentphase = 'finalized' or currentphase = 'Closed') 
+group by lienproductid
+
+--select * from #stageorder
+--select * from #finalizeddate2
+
+--drop table #main
+--Main Query
+select  FPV.Id as LienId, FPV.Stage, FD.FirstFinalized as FinalizedDate_Liens, Lientype, FPV.ClosedReason,
+		FPV.CaseName, 
+		clients.Id as 'Client Id',
+        clients.FinalizedStatusId, F.Max_ChangeDate as FinalizedDate_Clients,
+        FPV.IsMT, FPV.OnBenefits, FPV.OnBenefitsVerified, FPV.CollectorName, FPV.FinalDemandAmount, FPV.CreatedOn,
+		C.Tort, FPV.CaseUserDisplayName
+into #Main
+from FullProductViews as FPV 
+		LEFT OUTER JOIN #finalizeddate2 as FD on FD.LienProductId=FPV.Id
+		LEFT JOIN clients on clients.id = FPV.clientid
+        LEFT JOIN JB_ClientFinalizedDate as F on clients.Id = F.ClientId
+		LEFT OUTER JOIN Cases as C on C.Id=FPV.CaseId
+
+where  FPV.IsMT = 1 and FPV.OnBenefits = 'Yes'
+		and casename not like '%hold%' and casename not like '%closed%' and casename not like '%extra liens%' 
+		and casename not like '%production debug%' and casename is not null and casename <> 'null'
+		and (FPV.ClosedReason is null or FPV.ClosedReason not in ('Per Attorney Request', 'Opt Out', 'Opened In Error'))
+		--and FPV.Id = 760487
+
+--select * from #main 
+--where FinalizedDate_Liens is null
+--where datepart(month, createdon)=datepart(month, finalizeddate_liens) and datepart(year, createdon)=datepart(year, finalizeddate_liens)
+
+
+
+
+--drop table #5box
+--First for 5Box Dashboard
+select sub.LienProductsId, sub.LienType, sub.Stage, cast(sub.liencreatedate as date) as CreatedOn, sub.FinalizedDate_Liens, sub.OnBenefits, sub.SettlementDate, sub.Tort, sub.CaseName, sub.CaseUserDisplayName
+into #5box
+from	(
+		
+		select distinct PSHT.LienProductId as LienProductsId, PSHT.LienType, PSHT.CurrentStage as Stage, --cast(PSHT.StageDate as date) as ChangeDate,
+				C.Name as 'CaseName', --PFT.CaseId, 
+				C.SettlementDate, C.Tort,
+				--PFT.ClosedReason, PFT.LienProductStatus, PFT.OnBenefitsVerified, cast(PFT.ChangeDate as date) as PFT_ChangeDate, , PFT.CaseIsMt,
+				M.FinalizedDate_Liens, FPV.OnBenefits, PSHT.liencreatedate, FPV.CaseUserDisplayName
+		
+		from productstagehistory_table as PSHT
+				--LEFT OUTER JOIN ProductsFactTable as PFT on PFT.lienproductsId = PSHT.LienProductId and PSHT.StageDate = PFT.ChangeDate
+				LEFT OUTER JOIN Cases as C on C.Id = PSHT.CaseId
+				LEFT OUTER JOIN #Main as M on M.LienId = PSHT.LienProductId
+				LEFT OUTER JOIN FullProductViews as FPV on FPV.Id = PSHT.LienProductId
+		
+		where PSHT.LienProductId not in (select FullProductViews.Id 
+										from FullProductViews LEFT JOIN Cases on Cases.Id=FullProductViews.CaseId 
+										where ClosedReason like 'Per Attorney Request' OR ClosedReason like 'Opt Out' OR ClosedReason like 'Opened In Error' 
+											--OR FullProductViews.IsMT is null or FullProductViews.IsMT = 0 
+											OR StatusId = 3 or StatusId is null 
+											OR Cases.Name like '%closed%' OR Cases.Name like '%hold%')
+				and FPV.IsMT = 1 
+				and FPV.OnBenefits = 'Yes' 
+				--and C.SettlementDate is not null
+				--and PSHT.LienProductId = 760487
+	) as sub
+group by sub.lienproductsid, sub.lientype, sub.Stage, sub.liencreatedate, sub.FinalizedDate_Liens, sub.OnBenefits, sub.SettlementDate, sub.Tort, sub.CaseName, sub.CaseUserDisplayName
+
+--select top 5 * from #5box
+--select top 5 * from #5box2
+
+--drop table #5box2
+--Second for 5Box Dashboard (add dates)
+
+select sub.LienProductsId,sub.LienType, sub.Stage, sub.createdon, sub.FinalizedDate_Liens, sub.OnBenefits, sub.SettlementDate, sub.Tort, sub.Date, 
+		Case
+			When sub.Date is null then sub.createdon
+			else sub.Date
+			end as Date_Mod,
+		sub.RowNumber, R.MaxRow, sub.CaseName, sub.CaseUserDisplayName
+into #5box2		
+from (
+		select *, ROW_NUMBER() OVER(Partition by box.LienProductsId order by d.date) as RowNumber
+		from #5Box as box
+				LEFT JOIN JB_Dates as D on box.CreatedOn <= D.Date and Box.FinalizedDate_Liens >= D.Date
+		) as sub
+
+
+		LEFT JOIN 
+		(
+			select lienproductsid, max(RowNumber) as MaxRow 
+			from 
+						(select *, 
+								ROW_NUMBER() OVER(Partition by LienProductsId order by date) as RowNumber
+						from #5Box 
+								LEFT JOIN JB_Dates as D on #5Box.CreatedOn <= D.Date and #5Box.FinalizedDate_Liens >= D.Date) as Row#
+			group by lienproductsid
+		) as R 
+			on R.LienProductsId = sub.LienProductsId
+
+
+--select top 5 * from #5box2
+--select top 5 * from #5box3
+
+
+
+--drop table #5box3
+--5Box 3 (create new table for claimants without a finalizeddate)
+
+select LienProductsId, LienType, Stage, createdon, FinalizedDate_Liens, OnBenefits, SettlementDate, Tort, Date, GetDate() as Date_Mod, RowNumber, MaxRow, CaseName, CaseUserDisplayName
+into #5box3
+from #5box2
+where FinalizedDate_Liens is null and MaxRow = 1
+
+
+
+--drop table #5box5
+--select * from #5box5
+--5Box 4 (get rows with dates for claimants without a finalized date)
+
+select sub.LienProductsId, sub.LienType, sub.Stage, sub.createdon, sub.FinalizedDate_Liens, sub.OnBenefits, sub.SettlementDate, sub.Tort, sub.Date, 
+		Case
+			When sub.Date is null then sub.createdon
+			else sub.Date
+			end as Date_Mod,
+		sub.RowNumber, R.MaxRow, sub.CaseName, sub.CaseUserDisplayName
+Into #5box5
+from (
+		select distinct box.LienProductsId, box.settlementdate, box.LienType, box.OnBenefits, box.Stage, box.createdon, box.FinalizedDate_Liens, box.Date_Mod, D.Date, box.Tort,
+								ROW_NUMBER() OVER(Partition by box.LienProductsId order by d.date) as RowNumber, box.CaseName, box.CaseUserDisplayName
+		from #5box3 as box 
+				LEFT JOIN JB_Dates as D on box.CreatedOn <= D.Date and box.Date_Mod >= D.Date
+		) as sub
+
+
+		LEFT JOIN 
+		(
+			select distinct lienproductsid, max(RowNumber) as MaxRow 
+			from 
+						(select distinct box.LienProductsId,-- box.Date_Mod, D.Date, --box.Stage, box.OnBenefits, box.createdon, box.FinalizedDate_Liens, 
+								ROW_NUMBER() OVER(Partition by box.LienProductsId order by d.date) as RowNumber
+						from #5box3 as box
+								LEFT JOIN JB_Dates as D on box.CreatedOn <= D.Date and box.Date_Mod >= D.Date) as Row#
+			group by lienproductsid
+		) as R 
+			on R.LienProductsId = sub.LienProductsId
+
+group by sub.LienProductsId, sub.LienType, sub.OnBenefits, sub.Stage, sub.CreatedOn, sub.FinalizedDate_Liens, sub.Date, Date_Mod, R.MaxRow, sub.RowNumber, sub.SettlementDate, sub.Tort, sub.CaseUserDisplayName, sub.CaseName
+
+
+
+
+--5Box 5 (insert new data into query 2)
+--select top 5 * from #5box2
+--select top 5 * from #5box5
+
+insert into #5box2
+select * from #5box5
+
+
+--drop table #5box4
+--5box 6 Find rows where Row# = 1 and createdon <> Date_Mod
+
+select LienProductsId, LienType, Stage, createdon, FinalizedDate_Liens, OnBenefits, SettlementDate, Tort, Date, createdon as Date_Mod, RowNumber, MaxRow, CaseName, CaseUserDisplayName
+into #5box4
+from #5box2
+where DATEPART(month, date_mod) <> datepart(month, createdon) and RowNumber = 1 and createdon < Date_Mod
+
+--select top 5 * from #5box4
+--select top 5 * from #5box2
+
+
+
+--5box 7 (insert new row of data into #5box2)
+
+insert into #5box2
+select * from #5box4
+
+
+
+--5box8 (get all data)
+select * from #5box2
+order by Date_mod
+
+
+
+END
+GO
+
+
