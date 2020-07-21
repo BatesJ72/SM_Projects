@@ -1,0 +1,172 @@
+USE [S3Reporting]
+GO
+/****** Object:  StoredProcedure [dbo].[JB_OBV_v4]    Script Date: 7/20/2020 4:53:28 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+
+
+
+ALTER procedure [dbo].[JB_OBV_v4]
+
+AS
+
+BEGIN
+	-- SET NOCOUNT ON added to prevent extra result sets from
+	-- interfering with SELECT statements.
+	SET NOCOUNT ON;
+
+--Query 1 (get SQL data)
+--drop table #JB_OBV_2
+select sub.LienProductsId, sub.LienType, cast(sub.CreatedOn as date) as CreatedOn, min(sub.OnBenefitsVerified) as OnBenefitsVerified_ChangeDate, 
+		sub.OnBenefits, sub.OnBenefitsVerified, sub.tort, sub.CaseUserDisplayName, sub.CaseName--, sub.LienProductStatus, sub.CaseIsMT, sub.ClosedReason
+into #JB_OBV_2
+from	(
+		
+		select distinct FPV.Id as LienProductsId, FPV.LienType, FPV.Stage, --cast(PSHT.StageDate as date) as ChangeDate,
+				C.Name as 'CaseName', FPV.CaseId, C.Tort,
+				FPV.ClosedReason, FPV.LienProductStatus, 
+				Case
+					WHEN FPV.OnBenefits = '' then null 
+					else FPV.OnBenefits 
+					end as OnBenefits,
+				FPV.OnBenefitsVerified, --cast(PFT.ChangeDate as date) as PFT_ChangeDate, 
+				FPV.CreatedOn, FPV.IsMt, 
+				FPV.CaseUserDisplayName
+		
+		from	FullProductViews as FPV
+					LEFT OUTER JOIN Cases as C on C.Id=FPV.CaseId
+				--productstagehistory_table as PSHT
+				--LEFT OUTER JOIN ProductsFactTable as PFT on PFT.lienproductsId = PSHT.LienProductId and PSHT.StageDate = PFT.ChangeDate 
+				--LEFT OUTER JOIN Cases as C on C.Id = PFT.CaseId
+				--LEFT OUTER JOIN FullProductViews as FPV on PSHT.LienProductId=FPV.Id
+		
+		where FPV.Id not in (select FPV.Id 
+										from FullProductViews as FPV --LEFT JOIN Cases on Cases.Id=FPV.CaseId 
+										where FPV.ClosedReason like 'Per Attorney Request' OR FPV.ClosedReason like 'Opt Out' OR FPV.ClosedReason like 'Opened In Error'
+												OR FPV.IsMT = 0 or FPV.IsMT is null OR FPV.statusid = 3 or FPV.statusid is null 
+												OR FPV.CaseName like '%closed%' OR FPV.CaseName like '%hold%' OR FPV.CaseName like '%extra%')
+				--and FPV.Id = 1065278
+	) as sub
+--where sub.CaseUserDisplayName <> 'Global' and sub.CaseUserDisplayName <> 'Complete'
+group by sub.lienproductsid, sub.LienType, sub.CreatedOn, sub.OnBenefits, sub.OnBenefitsVerified, sub.tort, sub.CaseUserDisplayName, sub.CaseName
+
+--select top 10 * from #JB_OBV_2
+--select * from #JB_OBVDates_v2_2
+
+
+--Query 2 (add dates)
+--drop table #JB_OBVDates_v2_2
+select sub.LienProductsId, sub.LienType, sub.OnBenefits, sub.createdon, sub.OnBenefitsVerified, sub.OnBenefitsVerified_ChangeDate, sub.Date, 
+		Case
+			When sub.Date is null then sub.OnBenefitsVerified
+			else sub.Date
+			end as Date_Mod,
+		sub.RowNumber, R.MaxRow, sub.Tort, sub.CaseUserDisplayName, sub.CaseName
+into #JB_OBVDates_v2_2
+from (
+		select *, ROW_NUMBER() OVER(Partition by LienProductsId order by date) as RowNumber
+		from #JB_OBV_2 as OBV
+				LEFT JOIN JB_Dates as D on OBV.CreatedOn <= D.Date and OBV.OnBenefitsVerified_ChangeDate >= D.Date
+		) as sub
+
+
+		LEFT JOIN 
+		(
+			select lienproductsid, max(RowNumber) as MaxRow 
+			from 
+						(select *, ROW_NUMBER() OVER(Partition by LienProductsId order by date) as RowNumber
+						from #JB_OBV_2 as OBV
+								LEFT JOIN JB_Dates as D on OBV.CreatedOn <= D.Date and OBV.OnBenefitsVerified_ChangeDate >= D.Date) as Row#
+			group by lienproductsid
+		) as R 
+			on R.LienProductsId = sub.LienProductsId
+
+
+--Query 3 (create new table for claimants without an onbenefitsverified date)
+--drop table #JB_OBVDates_v3_2
+
+select LienProductsId, LienType, OnBenefits, createdon, OnBenefitsVerified, OnBenefitsVerified_ChangeDate, Date , GetDate() as Date_Mod, MaxRow, Tort, CaseUserDisplayName, CaseName
+into #JB_OBVDates_v3_2
+from #JB_OBVDates_v2_2
+where OnBenefits is null and MaxRow = 1
+
+--select * from #JB_OBVDates_v3_2
+
+
+
+--drop table #JB_OBVDates_v4_2
+--Query 4 (get rows with dates for new data)
+
+
+select sub.LienProductsId, sub.LienType, sub.OnBenefits, sub.createdon, sub.OnBenefitsVerified, sub.OnBenefitsVerified_ChangeDate, sub.Date, 
+		Case
+			When sub.Date is null then sub.createdon
+			else sub.Date
+			end as Date_Mod,
+		Sub.RowNumber, R.MaxRow, sub.tort, sub.CaseUserDisplayName, sub.CaseName
+into #JB_OBVDates_v4_2
+from (
+		select OBV.LienProductsId, LienType, OBV.OnBenefits, OBV.createdon, OBV.OnBenefitsVerified, OBV.OnBenefitsVerified_ChangeDate, OBV.Date_Mod, D.Date,OBV.Tort,
+				ROW_NUMBER() OVER(Partition by OBV.LienProductsId order by d.date) as RowNumber, OBV.CaseUserDisplayName, OBV.CaseName
+		from #JB_OBVDates_v3_2 as OBV
+				LEFT JOIN JB_Dates as D on OBV.CreatedOn <= D.Date and OBV.Date_Mod >= D.Date
+		) as sub
+
+
+		LEFT JOIN 
+		(
+			select lienproductsid, max(RowNumber) as MaxRow 
+			from 
+						(select OBV.LienProductsId, --OBV.OnBenefits, OBV.createdon, OBV.OnBenefitsVerified, OBV.OnBenefitsVerified_ChangeDate, OBV.Date_Mod, D.Date, 
+								ROW_NUMBER() OVER(Partition by OBV.LienProductsId order by d.date) as RowNumber
+						from #JB_OBVDates_v3_2 as OBV
+								LEFT JOIN JB_Dates as D on OBV.CreatedOn <= D.Date and OBV.Date_Mod >= D.Date) as Row#
+			group by lienproductsid
+		) as R 
+			on R.LienProductsId = sub.LienProductsId
+
+
+
+--select top 5 * from #JB_OBVDates_v4_2
+--select top 5 * from #JB_OBVDates_v2_2
+
+
+--Query 5 (insert new data into query 2)
+insert into #JB_OBVDates_v2_2
+select * from #JB_OBVDates_v4_2
+
+
+
+--drop table #JB_OBVDates_v5_2
+--Query 6 Find rows where Row# = 1 and createdon <> Date_Mod
+
+select LienProductsId, LienType, OnBenefits, createdon, OnBenefitsVerified, OnBenefitsVerified_ChangeDate, Date, createdon as Date_Mod, RowNumber, MaxRow, Tort, CaseUserDisplayName, CaseName
+into #JB_OBVDates_v5_2
+from #JB_OBVDates_v2_2
+where (DATEPART(month, date_mod) <> datepart(month, createdon)) and RowNumber = 1 and createdon < Date_Mod
+
+--select top 5 * from #JB_OBVDates_v2_2
+--select top 5 * from #JB_OBVDates_v5_2
+
+
+
+--5box 7 (insert new row of data into #JB_OBVDates_v2_2)
+
+insert into #JB_OBVDates_v2_2
+select * from #JB_OBVDates_v5_2
+
+
+
+--5box8 (get all data)
+select *
+from #JB_OBVDates_v2_2
+order by Date_mod
+
+
+
+
+END 
