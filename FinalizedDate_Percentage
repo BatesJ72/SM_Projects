@@ -28,7 +28,7 @@ BEGIN
 --Main Query
 	--drop table #main
 
-select  C.Name as CaseName, C.Id as CaseId,
+select  distinct C.Name as CaseName, C.Id as CaseId,
 		clients.Id as 'Client Id',
         clients.FinalizedStatusId, F.Max_ChangeDate as FinalizedDate_Clients,
         C.IsMT,	Clients.CreatedOn, C.Tort, FPV.CaseUserDisplayName
@@ -41,7 +41,10 @@ from clients
 where  C.IsMT = 1 
 		and FPV.casename not like '%hold%' and FPV.casename not like '%closed%' and FPV.casename not like '%extra liens%' 
 		and FPV.casename not like '%production debug%' and FPV.casename is not null and FPV.casename <> 'null'
+		--and clients.id = 139642
 
+
+		--select * from #Main
 
 
 
@@ -96,7 +99,7 @@ from (
 			on R.[Client Id] = sub.[Client Id]
 
 
---select top 10 * from #5box2
+--select * from #5box2
 --select top 10 * from #5box3 
 
 
