@@ -82,7 +82,7 @@ group by lienproductid
 select  FPV.Id as LienId, FPV.StatusName, FPV.Stage, FPV.ClosedReason, 
 		FD.FirstFinalized as FinalizedDate_Liens, Lientype,
 		FPV.CaseName, 
-		FPV.ClientId as 'Client Id', FPV.ClientSettlementAmount, 
+		Clients.CreatedOn, FPV.ClientId as 'Client Id', FPV.ClientSettlementAmount, 
         clients.FinalizedStatusId, F.Max_ChangeDate as FinalizedDate_Clients,
         FPV.IsMT, FPV.OnBenefits, FPV.OnBenefitsVerified, FPV.CollectorName, FPV.FinalDemandAmount, 
 		Case
