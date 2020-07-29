@@ -38,10 +38,20 @@ from clients
         LEFT JOIN JB_ClientFinalizedDate as F on clients.Id = F.ClientId
 		LEFT OUTER JOIN Cases as C on C.Id=Clients.CaseId
 		
+		
 where  C.IsMT = 1 
 		and FPV.casename not like '%hold%' and FPV.casename not like '%closed%' and FPV.casename not like '%extra liens%' 
 		and FPV.casename not like '%production debug%' and FPV.casename is not null and FPV.casename <> 'null'
-		and FPV.ClientId not in (select clientid from fullproductviews where stage in ('Awaiting Information')) 
+		--excludes "missing info" stages
+		and FPV.ClientId not in (select clientid from fullproductviews where stage in ('Awaiting Information', 'Pending Internal Finalization', 'Initial No Entitlement','Awaiting Information','Claims Received/Pending Injury Details','To Send - Claims Request/Pending Surgeries','Awaiting Consents','To Send - EV/Pending Injury Details','Claims Received/Pending Settlement','To Send - Claims Request/Pending Settlement','No Lien/Pending Settlement','Awaiting Documents','Awaiting Sponsor/Facility Information','To Send - EV/Pending Settlement','Awaiting Medical Records','Awaiting Fees/Costs','Awaiting Estate Documents and Updated POR','To Send - Attorney Verification','To Send - Dispute/Pending Settlement','Pending Verification','Awaiting Additional Medical Records','Hold')) 
+		--excludes anyone with a deficiency
+		and FPV.ClientId not in (select fpv.ClientId
+								from fullproductviews as fpv
+										JOIN Deficiencies as d on d.EntityId=FPV.Id
+								where d.stagename <> 'Cured')
+
+		
+		
 		--and clients.id = 320083
 
 
