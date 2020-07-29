@@ -1,6 +1,6 @@
 USE [S3Reporting]
 GO
-/****** Object:  StoredProcedure [dbo].[JB_FinalizedDate_Percentage]    Script Date: 7/23/2020 5:25:46 PM ******/
+/****** Object:  StoredProcedure [dbo].[JB_FinalizedDate_Percentage]    Script Date: 7/29/2020 10:03:14 AM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -25,14 +25,14 @@ BEGIN
 
 
 
---Main Query
+--Gets the clients we want to look at
 	--drop table #main
 
 select  distinct C.Name as CaseName, C.Id as CaseId,
 		clients.Id as 'Client Id',
         clients.FinalizedStatusId, F.Max_ChangeDate as FinalizedDate_Clients,
         C.IsMT,	Clients.CreatedOn, C.Tort, FPV.CaseUserDisplayName
-into #Main
+---into #Main
 from clients 
 		LEFT JOIN FullProductViews as FPV on clients.id = FPV.clientid
         LEFT JOIN JB_ClientFinalizedDate as F on clients.Id = F.ClientId
@@ -41,7 +41,10 @@ from clients
 where  C.IsMT = 1 
 		and FPV.casename not like '%hold%' and FPV.casename not like '%closed%' and FPV.casename not like '%extra liens%' 
 		and FPV.casename not like '%production debug%' and FPV.casename is not null and FPV.casename <> 'null'
-		--and clients.id = 139642
+		and FPV.ClientId not in (select clientid from fullproductviews where stage in ('Awaiting Information')) 
+		--and clients.id = 320083
+
+
 
 
 		--select * from #Main
