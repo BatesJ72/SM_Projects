@@ -32,7 +32,7 @@ select  distinct C.Name as CaseName, C.Id as CaseId,
 		clients.Id as 'Client Id',
         clients.FinalizedStatusId, F.Max_ChangeDate as FinalizedDate_Clients,
         C.IsMT,	Clients.CreatedOn, C.Tort, FPV.CaseUserDisplayName
----into #Main
+into #Main
 from clients 
 		LEFT JOIN FullProductViews as FPV on clients.id = FPV.clientid
         LEFT JOIN JB_ClientFinalizedDate as F on clients.Id = F.ClientId
