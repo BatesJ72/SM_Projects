@@ -1,9 +1,6 @@
 USE [S3Reporting]
 GO
-/****** Object:  StoredProcedure [dbo].[JB_FinalizedDate_PLRPSubmitDate]    Script Date: 7/27/2020 5:43:41 PM ******/
-SET ANSI_NULLS ONUSE [S3Reporting]
-GO
-/****** Object:  StoredProcedure [dbo].[JB_FinalizedDate_PLRPSubmitDate]    Script Date: 7/27/2020 5:43:41 PM ******/
+/****** Object:  StoredProcedure [dbo].[JB_FinalizedDate_PLRPSubmitDate]    Script Date: 8/7/2020 2:55:11 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -112,7 +109,8 @@ select  FPV.Id as LienId, FPV.StatusName, FPV.Stage, FPV.ClosedReason,
 			when M.ClientId is not null then 'Global'
 			when M.ClientId is null then 'Traditional'
 			else 'Look Into'
-			end as 'Medicare Global or Traditional'
+			end as 'Medicare Global or Traditional',
+		LST.[Days In Stage]
 
 from FullProductViews as FPV 
 		LEFT OUTER JOIN #finalizeddate2 as FD on FD.LienProductId=FPV.Id
@@ -128,7 +126,9 @@ from FullProductViews as FPV
 						(select EntityId,MIN(CreatedDate) as AutoCreatedOn
 						from notifications.ChangesLogs 
 						where EntityTypeId = 2 
-						group by EntityId, modified_by_user_Id) as Entity on Entity.EntityId=FPV.Id
+						group by EntityId) as Entity on Entity.EntityId=FPV.Id
+		LEFT OUTER JOIN (select LienId, datediff(day, changedate, getdate()) as [Days In Stage] from LienStageTracker) 
+				as LST on LST.LienId=FPV.Id
 
 where	FPV.IsMT = 1
 		and casename not like '%hold%' and casename not like '%closed%' and casename not like '%extra liens%' 
@@ -138,139 +138,11 @@ where	FPV.IsMT = 1
 
 order by [PLRP Opt In/Out] desc
 
-END
 
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-
+--drop table #finalizeddate
+--drop table #StageOrder
+--drop table #FinalizedDate2
 
 
--- =============================================
--- Author:		<JB>
--- Create date: <12-12-19>
--- Description:	<Description,,>
--- =============================================
-ALTER PROCEDURE [dbo].[JB_FinalizedDate_PLRPSubmitDate]
-	
-AS
-BEGIN
-	-- SET NOCOUNT ON added to prevent extra result sets from
-	-- interfering with SELECT statements.
-	SET NOCOUNT ON;
-
-
---Query 1: Gets list of all currently finalized products and gets data from PSH_T about the dates they were finalized
-		--Goal: Get the most recent date the lien was pushed to final
-
-	--drop table #finalizeddate
-
-select lienproductid, stagedate, stage, phase, CurrentPhase
-into #finalizeddate
-from ProductStageHistory_Table
-where (phase = 'Finalized' or phase = 'Closed') and (currentphase = 'finalized' or currentphase = 'Closed') 
-group by lienproductid, stage, phase, stagedate, CurrentPhase
-order by lienproductid, stagedate
-
-	--select * from #finalizeddate
-
-
---Query 2: Categorizes each row from Query 1 as either "StraightClosed" or "HasFinal" 
-		--(aka was the lien pushed straight to closed or did it have a finalized stage?)
-
-select sub.*, 
-		case
-			when RowNumber = 1 and sub.Phase = 'Closed' then 'StraightClosed'
-			Else 'HasFinal'
-			End as 'StageOrder'
-into #StageOrder
-from (
-		select *, ROW_NUMBER() over(partition by lienproductid order by phase desc) as RowNumber
-		from #finalizeddate
-	) as sub
-
-	
-	--select * from #stageorder
-
-
---Query 3: Get date the lien was closed for 'straight to closed' liens. Put this date in a new table #FinalizedDate2.
-
-	--drop table #FinalizedDate2
-
-
-select lienproductid, min(stagedate) as FirstFinalized
-into #FinalizedDate2
-from #StageOrder
-where StageOrder = 'StraightClosed'
-group by lienproductid
-order by lienproductid
-
-
---Query 4: For all liens that didn't go straight to closed (aka had a final stage), append that data to the #FinalizedDate2 table from Query 3.
-Insert Into #FinalizedDate2 (lienproductid, FirstFinalized)
-select lienproductid, max(stagedate) as FirstFinalized 
-from #StageOrder
-where StageOrder = 'HasFinal' 
-		and (phase = 'Finalized') and (currentphase = 'finalized' or currentphase = 'Closed') 
-group by lienproductid
-
-
-
---Query 5: Main Query
-select  FPV.Id as LienId, FPV.StatusName, FPV.Stage, FPV.ClosedReason, 
-		FD.FirstFinalized as FinalizedDate_Liens, Lientype,
-		FPV.CaseName, 
-		Clients.CreatedOn, FPV.ClientId as 'Client Id', FPV.ClientSettlementAmount, 
-        clients.FinalizedStatusId, F.Max_ChangeDate as FinalizedDate_Clients,
-        FPV.IsMT, FPV.OnBenefits, FPV.OnBenefitsVerified, FPV.CollectorName, FPV.FinalDemandAmount, 
-		Case
-			when FPV.CreatedOn is null then Entity.AutoCreatedOn
-			else FPV.CreatedOn
-			end as CreatedOn,		
-		C.Tort, E.Earliest_PLRPSubmission, 
-		case
-			when O.ClientId is not null then 'Opt Out'
-			when O.ClientId is null then 'Opt In'
-			else 'Look Into'
-			end as 'PLRP Opt In/Out', 
-		case
-			when P.ClientId is not null and P.PLRP_OnBenefits like '%yes%' then 'Pending PLRP Lien - Yes OnBenefits'
-			when P.ClientId is not null and P.PLRP_OnBenefits like '%pending%' then 'Pending PLRP Lien - Pending OnBenefits'
-			when P.ClientId is not null and P.PLRP_OnBenefits like '%no%' then 'Pending PLRP Lien - No OnBenefits'
-			when FP.ClientId is not null and FP.PLRP_OnBenefits like '%yes%' then 'Final PLRP Lien - Yes OnBenefits'
-			when FP.ClientId is not null and FP.PLRP_OnBenefits like '%no%' then 'Final PLRP Lien - No OnBenefits'
-			when FP.ClientId is not null and FPV.ClosedReason in ('Opened in Error', 'Per Attorney Request', 'Opt Out') then 'Final PLRP Lien - No OnBenefits'
-			when FP.ClientId is not null and FP.PLRP_OnBenefits like '%pending%' then 'Final PLRP Lien - Pending OnBenefits'
-			else 'Look Into'
-			end as 'Pending PLRP?',
-		case
-			when M.ClientId is not null then 'Global'
-			when M.ClientId is null then 'Traditional'
-			else 'Look Into'
-			end as 'Medicare Global or Traditional'
-
-from FullProductViews as FPV 
-		LEFT OUTER JOIN #finalizeddate2 as FD on FD.LienProductId=FPV.Id
-		LEFT OUTER JOIN clients on clients.id = FPV.clientid
-        LEFT OUTER JOIN JB_ClientFinalizedDate as F on clients.Id = F.ClientId
-		LEFT OUTER JOIN Cases as C on C.Id = FPV.CaseId
-		LEFT OUTER JOIN JB_Earliest227PLRPSubmissionDate as E on E.ClientId = FPV.ClientId
-		LEFT OUTER JOIN JB_PLRPOptOut as O on O.ClientID = FPV.ClientId
-		LEFT OUTER JOIN JB_PendingPLRP as P on P.ClientID = FPV.ClientId
-		LEFT OUTER JOIN JB_FinalPLRP as FP on FP.ClientID = FPV.ClientId
-		LEFT OUTER JOIN JB_McareGlobalvsTrad as M on M.ClientId = FPV.ClientId
-		LEFT OUTER JOIN
-						(select EntityId,MIN(CreatedDate) as AutoCreatedOn
-						from notifications.ChangesLogs 
-						where EntityTypeId = 2 
-						group by EntityId, modified_by_user_Id) as Entity on Entity.EntityId=FPV.Id
-
-where	FPV.IsMT = 1
-		and casename not like '%hold%' and casename not like '%closed%' and casename not like '%extra liens%' 
-		and casename not like '%production debug%' and casename is not null and casename <> 'null'
-		and (FPV.ClosedReason is null or FPV.ClosedReason not in ('Per Attorney Request', 'Opened In Error'))
-
-
-order by [PLRP Opt In/Out] desc
 
 END
