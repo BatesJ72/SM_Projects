@@ -1,0 +1,29 @@
+--This gets a list of any claimant in a GRG case that has a pending lien not assigned to GRG
+
+select sub3.ClientId
+from	(
+		select	ClientId, Final, Pending
+		from	(
+					select sub.* 
+					from	(
+								select	clientid, clientfirstname, clientlastname, 
+										id as LienId, LienType, StatusId, StatusName, Stage, 
+										case
+											when stage like 'closed' or stage like 'final%' then 'Final'
+											else 'Pending'
+											end as F_or_P,
+										InactiveReasonName, InactiveReasonId, 
+										AssignedUserId, UserName
+								from	fullproductviews
+								where	casename like '%grg%'
+											and (InactiveReasonId is null or InactiveReasonId not in (1, 3))
+											and (StatusId is null or StatusId not in (2))
+								) as sub
+					where sub.F_or_P = 'Pending' and sub.AssignedUserId <> 141
+					) as sub2
+	
+			PIVOT(count(sub2.LienId) for sub2.F_or_P in ([Final], [Pending])) as pivot1
+			) as sub3
+where sub3.Pending > 0
+
+
